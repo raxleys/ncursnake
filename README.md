@@ -1,15 +1,19 @@
 # ncursnake
 
-Simple snake game written in C with the ncurses library.
+Simple snake game written in C with the ncurses library. Only tested on Linux.
 
 ## Build
 
-### Requirements
+### Dependencies
 
-- Linux
 - ncurses
 
-### Linux
+### Installation (Debian)
+
+```sh
+apt install ncurses-bin libncurses-dev
+apt install ncurses-doc # Optional, to get man pages
+```
 
 ```sh
 make
