@@ -220,7 +220,7 @@ bool check_collisions(TileQueueIter *it)
 {
     Tile *t = it->val;
     // Arena bounds
-    if (t->x >= SCR_WIDTH || t->x < 0 || t->y >= SCR_HEIGHT || t->y < 0)
+    if (t->x >= SCR_WIDTH - 1 || t->x < 1 || t->y >= SCR_HEIGHT - 1 || t->y <= 1)
         return false;
 
     // Iterate from the next tile
@@ -360,7 +360,7 @@ int main()
         // Draw snake
         TileQueueIter it = tq_iter(&snake);
         while (tq_next(&it)) {
-            mvaddch(it.val->y, it.val->x, '#');
+            mvaddch(it.val->y, it.val->x, 'O');
         }
 
         // TODO: DEBUG
@@ -405,14 +405,14 @@ void ncurses_deinit()
 void draw_border()
 {
     // Corners
-    mvaddch(1, 0, '+');
-    mvaddch(1, SCR_WIDTH - 1, '+');
-    mvaddch(SCR_HEIGHT - 1, 0, '+');
-    mvaddch(SCR_HEIGHT - 1, SCR_WIDTH - 1, '+');
+    mvaddch(1, 0, '#');
+    mvaddch(1, SCR_WIDTH - 1, '#');
+    mvaddch(SCR_HEIGHT - 1, 0, '#');
+    mvaddch(SCR_HEIGHT - 1, SCR_WIDTH - 1, '#');
 
     // Edges
-    mvhline(1, 1, '-', SCR_WIDTH - 2);
-    mvhline(SCR_HEIGHT - 1, 1, '-', SCR_WIDTH - 2);
-    mvvline(2, 0, '|', SCR_HEIGHT - 3);
-    mvvline(2, SCR_WIDTH - 1, '|', SCR_HEIGHT - 3);
+    mvhline(1, 1, '#', SCR_WIDTH - 2);
+    mvhline(SCR_HEIGHT - 1, 1, '#', SCR_WIDTH - 2);
+    mvvline(2, 0, '#', SCR_HEIGHT - 3);
+    mvvline(2, SCR_WIDTH - 1, '#', SCR_HEIGHT - 3);
 }
