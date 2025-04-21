@@ -6,14 +6,9 @@
 #include <ncurses.h>
 #include <string.h>
 
+// Global variables
 #define FPS 5
 #define FRAME_TIME (1000 * 1000 / FPS) // us
-
-void ncurses_init();
-void ncurses_deinit();
-void draw_border();
-
-// Global variables
 int SCR_HEIGHT = 0;
 int SCR_WIDTH = 0;
 
@@ -27,7 +22,6 @@ typedef struct {
     enum Dir direction;
 } Tile;
 
-// Represents a location on the board where a Tile's direction changes
 typedef struct {
     size_t head;
     size_t tail;
@@ -47,6 +41,148 @@ typedef struct {
     size_t capacity;
     Tile *tiles;
 } TileArena;
+
+// Forward declarations
+void ncurses_init();
+void ncurses_deinit();
+void draw_border();
+bool ta_init(TileArena *ta);
+void ta_deinit(TileArena *ta);
+Tile *ta_next(TileArena *ta);
+void tq_printarr(FILE *file, TileQueue *queue);
+TileQueueIter tq_iter(TileQueue *tq);
+TileQueueIter tq_iter_clone(const TileQueueIter *it);
+bool tq_next(TileQueueIter *it);
+bool tq_grow(TileQueue *queue);
+bool tq_pushback(TileQueue *queue, Tile *tile);
+Tile *tq_popfront(TileQueue *queue);
+Tile *tq_peekfront(TileQueue *queue);
+Tile *tq_peekback(TileQueue *queue);
+bool tile_eq(const Tile *t1, const Tile *t2);
+bool check_collisions(TileQueueIter *it);
+bool move_snake(TileQueue *snake, TileQueue *movepoints);
+void add_movepoint(TileArena *mem, TileQueue *snake, TileQueue *movepoints, enum Dir direction);
+
+int main()
+{
+    ncurses_init();
+    getmaxyx(stdscr, SCR_HEIGHT, SCR_WIDTH);
+
+    TileArena tilemem = {0};
+    ta_init(&tilemem);
+
+    // Create snake
+    TileQueue snake = {0};
+#define SNAKE_INIT_SIZE 4
+    for (int i = 0; i < SNAKE_INIT_SIZE; i++) {
+        Tile *t = ta_next(&tilemem);
+
+        t->x = (SCR_WIDTH / 2) - i;
+        t->y = (SCR_HEIGHT / 2);
+        t->direction = DIR_RIGHT;
+
+        tq_pushback(&snake, t);
+        printf("Pushed %d!\n", i);
+    }
+
+    // A "move point" is a tile on the board at which a snake tile has
+    // to change directions. It is the tile at which the head was
+    // located at a time when the player changed directions
+    TileQueue movepoints = {0};
+
+    int ch;
+    struct timespec tlast, tcur;
+    do {
+        clock_gettime(CLOCK_MONOTONIC, &tlast);
+
+        // Input
+        ch = getch();
+        if (ch == 'q') {
+            break;
+        } else if (ch == KEY_UP) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_UP && head->direction != DIR_DOWN)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_UP);
+        } else if (ch == KEY_DOWN) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_UP && head->direction != DIR_DOWN)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_DOWN);
+        } else if (ch == KEY_RIGHT) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_LEFT && head->direction != DIR_RIGHT)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_RIGHT);
+        } else if (ch == KEY_LEFT) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_LEFT && head->direction != DIR_RIGHT)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_LEFT);
+        }
+
+        // Update
+        move_snake(&snake, &movepoints);
+
+        // Render
+        clear();
+        draw_border();
+
+        // Draw snake
+        TileQueueIter it = tq_iter(&snake);
+        while (tq_next(&it)) {
+            mvaddch(it.val->y, it.val->x, 'O');
+        }
+
+        // TODO: DEBUG
+        it = tq_iter(&movepoints);
+        while (tq_next(&it)) {
+            mvaddch(it.val->y, it.val->x, 'X');
+        }
+
+        // Print score
+        size_t score = 0; // TODO: move
+        mvprintw(0, 0, "Score: %zu", score);
+
+        refresh();
+
+        // Control FPS
+        clock_gettime(CLOCK_MONOTONIC, &tcur);
+        long elapsedus = (tcur.tv_sec - tlast.tv_sec) * (1000 * 1000) + (tcur.tv_nsec - tlast.tv_nsec) / 1000;
+        if (elapsedus < FRAME_TIME)
+            usleep(FRAME_TIME - elapsedus);
+    } while (true);
+
+    ta_deinit(&tilemem);
+    ncurses_deinit();
+    return 0;
+}
+
+void ncurses_init()
+{
+    initscr();
+    cbreak();
+    noecho();
+    curs_set(0);
+    keypad(stdscr, true);
+    nodelay(stdscr, true);
+}
+
+void ncurses_deinit()
+{
+    endwin();
+}
+
+void draw_border()
+{
+    // Corners
+    mvaddch(1, 0, '#');
+    mvaddch(1, SCR_WIDTH - 1, '#');
+    mvaddch(SCR_HEIGHT - 1, 0, '#');
+    mvaddch(SCR_HEIGHT - 1, SCR_WIDTH - 1, '#');
+
+    // Edges
+    mvhline(1, 1, '#', SCR_WIDTH - 2);
+    mvhline(SCR_HEIGHT - 1, 1, '#', SCR_WIDTH - 2);
+    mvvline(2, 0, '#', SCR_HEIGHT - 3);
+    mvvline(2, SCR_WIDTH - 1, '#', SCR_HEIGHT - 3);
+}
 
 bool ta_init(TileArena *ta)
 {
@@ -294,125 +430,4 @@ void add_movepoint(TileArena *mem, TileQueue *snake,
     memcpy(mp, t, sizeof(*t));
     mp->direction = direction;
     tq_pushback(movepoints, mp);
-}
-
-int main()
-{
-    ncurses_init();
-    getmaxyx(stdscr, SCR_HEIGHT, SCR_WIDTH);
-
-    TileArena tilemem = {0};
-    ta_init(&tilemem);
-
-    // Create snake
-    TileQueue snake = {0};
-#define SNAKE_INIT_SIZE 4
-    for (int i = 0; i < SNAKE_INIT_SIZE; i++) {
-        Tile *t = ta_next(&tilemem);
-
-        t->x = (SCR_WIDTH / 2) - i;
-        t->y = (SCR_HEIGHT / 2);
-        t->direction = DIR_RIGHT;
-
-        tq_pushback(&snake, t);
-        printf("Pushed %d!\n", i);
-    }
-
-    // A "move point" is a tile on the board at which a snake tile has
-    // to change directions. It is the tile at which the head was
-    // located at a time when the player changed directions
-    TileQueue movepoints = {0};
-
-    int ch;
-    struct timespec tlast, tcur;
-    do {
-        clock_gettime(CLOCK_MONOTONIC, &tlast);
-
-        // Input
-        ch = getch();
-        if (ch == 'q') {
-            break;
-        } else if (ch == KEY_UP) {
-            const Tile *head = tq_peekfront(&snake);
-            if (head->direction != DIR_UP && head->direction != DIR_DOWN)
-                add_movepoint(&tilemem, &snake, &movepoints, DIR_UP);
-        } else if (ch == KEY_DOWN) {
-            const Tile *head = tq_peekfront(&snake);
-            if (head->direction != DIR_UP && head->direction != DIR_DOWN)
-                add_movepoint(&tilemem, &snake, &movepoints, DIR_DOWN);
-        } else if (ch == KEY_RIGHT) {
-            const Tile *head = tq_peekfront(&snake);
-            if (head->direction != DIR_LEFT && head->direction != DIR_RIGHT)
-                add_movepoint(&tilemem, &snake, &movepoints, DIR_RIGHT);
-        } else if (ch == KEY_LEFT) {
-            const Tile *head = tq_peekfront(&snake);
-            if (head->direction != DIR_LEFT && head->direction != DIR_RIGHT)
-                add_movepoint(&tilemem, &snake, &movepoints, DIR_LEFT);
-        }
-
-        // Update
-        move_snake(&snake, &movepoints);
-
-        // Render
-        clear();
-        draw_border();
-
-        // Draw snake
-        TileQueueIter it = tq_iter(&snake);
-        while (tq_next(&it)) {
-            mvaddch(it.val->y, it.val->x, 'O');
-        }
-
-        // TODO: DEBUG
-        it = tq_iter(&movepoints);
-        while (tq_next(&it)) {
-            mvaddch(it.val->y, it.val->x, 'X');
-        }
-
-        // Print score
-        size_t score = 0; // TODO: move
-        mvprintw(0, 0, "Score: %zu", score);
-
-        refresh();
-
-        // Control FPS
-        clock_gettime(CLOCK_MONOTONIC, &tcur);
-        long elapsedus = (tcur.tv_sec - tlast.tv_sec) * (1000 * 1000) + (tcur.tv_nsec - tlast.tv_nsec) / 1000;
-        if (elapsedus < FRAME_TIME)
-            usleep(FRAME_TIME - elapsedus);
-    } while (true);
-
-    ta_deinit(&tilemem);
-    ncurses_deinit();
-    return 0;
-}
-
-void ncurses_init()
-{
-    initscr();
-    cbreak();
-    noecho();
-    curs_set(0);
-    keypad(stdscr, true);
-    nodelay(stdscr, true);
-}
-
-void ncurses_deinit()
-{
-    endwin();
-}
-
-void draw_border()
-{
-    // Corners
-    mvaddch(1, 0, '#');
-    mvaddch(1, SCR_WIDTH - 1, '#');
-    mvaddch(SCR_HEIGHT - 1, 0, '#');
-    mvaddch(SCR_HEIGHT - 1, SCR_WIDTH - 1, '#');
-
-    // Edges
-    mvhline(1, 1, '#', SCR_WIDTH - 2);
-    mvhline(SCR_HEIGHT - 1, 1, '#', SCR_WIDTH - 2);
-    mvvline(2, 0, '#', SCR_HEIGHT - 3);
-    mvvline(2, SCR_WIDTH - 1, '#', SCR_HEIGHT - 3);
 }
