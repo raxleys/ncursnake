@@ -6,11 +6,10 @@
 #include <ncurses.h>
 #include <string.h>
 
-// Global variables
+// Constants
 #define FPS 5
 #define FRAME_TIME (1000 * 1000 / FPS) // us
-int SCR_HEIGHT = 0;
-int SCR_WIDTH = 0;
+#define SNAKE_INIT_SIZE 5
 
 enum Dir {
     DIR_NONE, DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_DOWN
@@ -42,6 +41,14 @@ typedef struct {
     Tile *tiles;
 } TileArena;
 
+// Global variables
+int SCR_HEIGHT = 0;
+int SCR_WIDTH = 0;
+
+// Only 1 apple exists at a time, so just track it with a global
+// variable.
+Tile APPLE = {0};
+
 // Forward declarations
 void ncurses_init();
 void ncurses_deinit();
@@ -58,32 +65,33 @@ bool tq_pushback(TileQueue *queue, Tile *tile);
 Tile *tq_popfront(TileQueue *queue);
 Tile *tq_peekfront(TileQueue *queue);
 Tile *tq_peekback(TileQueue *queue);
+void tq_deinit(TileQueue *queue);
 bool tile_eq(const Tile *t1, const Tile *t2);
 bool check_collisions(TileQueueIter *it);
+void snake_init(TileArena *mem, TileQueue *snake);
+void grow_snake(TileArena *mem, TileQueue *snake);
 bool move_snake(TileQueue *snake, TileQueue *movepoints);
 void add_movepoint(TileArena *mem, TileQueue *snake, TileQueue *movepoints, enum Dir direction);
+void new_apple();
+bool check_eat_apple(const Tile *tile);
 
 int main()
 {
+    srand(time(NULL));
+
     ncurses_init();
     getmaxyx(stdscr, SCR_HEIGHT, SCR_WIDTH);
+    ncurses_deinit();
+    return 1;
 
     TileArena tilemem = {0};
     ta_init(&tilemem);
 
     // Create snake
     TileQueue snake = {0};
-#define SNAKE_INIT_SIZE 4
-    for (int i = 0; i < SNAKE_INIT_SIZE; i++) {
-        Tile *t = ta_next(&tilemem);
-
-        t->x = (SCR_WIDTH / 2) - i;
-        t->y = (SCR_HEIGHT / 2);
-        t->direction = DIR_RIGHT;
-
-        tq_pushback(&snake, t);
-        printf("Pushed %d!\n", i);
-    }
+    snake_init(&tilemem, &snake);
+    while (snake.size < SNAKE_INIT_SIZE)
+        grow_snake(&tilemem, &snake);
 
     // A "move point" is a tile on the board at which a snake tile has
     // to change directions. It is the tile at which the head was
@@ -92,6 +100,8 @@ int main()
 
     int ch;
     struct timespec tlast, tcur;
+    size_t score = 0;
+    new_apple();
     do {
         clock_gettime(CLOCK_MONOTONIC, &tlast);
 
@@ -118,7 +128,17 @@ int main()
         }
 
         // Update
-        move_snake(&snake, &movepoints);
+        if (!move_snake(&snake, &movepoints)) {
+            // Collision
+            // TODO
+            break;
+        }
+
+        if (check_eat_apple(tq_peekfront(&snake))) {
+            score += 10;
+            grow_snake(&tilemem, &snake);
+            new_apple();
+        }
 
         // Render
         clear();
@@ -130,14 +150,25 @@ int main()
             mvaddch(it.val->y, it.val->x, 'O');
         }
 
+        // Draw apple
+        mvaddch(APPLE.y, APPLE.x, 'a');
+
         // TODO: DEBUG
+#ifndef DEBUG
+#define DEBUG
+#endif
+
+#ifdef DEBUG
         it = tq_iter(&movepoints);
         while (tq_next(&it)) {
             mvaddch(it.val->y, it.val->x, 'X');
         }
 
+        // Print arena allocation info
+        mvprintw(0, 25, "Tile mem: %zu/%zu (%.2f%%)", tilemem.size, tilemem.capacity, ((double)tilemem.size)/((double)tilemem.capacity));
+#endif
+
         // Print score
-        size_t score = 0; // TODO: move
         mvprintw(0, 0, "Score: %zu", score);
 
         refresh();
@@ -149,6 +180,13 @@ int main()
             usleep(FRAME_TIME - elapsedus);
     } while (true);
 
+    // TODO
+    // Make getch blocking again.
+    nodelay(stdscr, false);
+    getch();
+
+    tq_deinit(&snake);
+    tq_deinit(&movepoints);
     ta_deinit(&tilemem);
     ncurses_deinit();
     return 0;
@@ -286,7 +324,7 @@ bool tq_next(TileQueueIter *it)
 
 bool tq_grow(TileQueue *queue)
 {
-    size_t newsize = queue->capacity > 0 ? queue->capacity * 2 : 4;
+    size_t newsize = queue->capacity > 0 ? queue->capacity * 2 : 64;
     Tile **tmp = calloc(newsize, sizeof(*tmp));
     if (!tmp) {
         perror("OOM");
@@ -347,6 +385,12 @@ Tile *tq_peekback(TileQueue *queue)
     return queue->tiles[i];
 }
 
+void tq_deinit(TileQueue *queue)
+{
+    free(queue->tiles);
+    memset(queue, 0, sizeof(*queue));
+}
+
 bool tile_eq(const Tile *t1, const Tile *t2)
 {
     return t1->x == t2->x && t1->y == t2->y;
@@ -368,6 +412,37 @@ bool check_collisions(TileQueueIter *it)
     }
 
     return true;
+}
+
+void snake_init(TileArena *mem, TileQueue *snake)
+{
+    // Start off the snake in the centre
+    Tile *t = ta_next(mem);
+    t->x = SNAKE_INIT_SIZE / 2 + SCR_WIDTH / 2;
+    t->y = SCR_HEIGHT / 2;
+    t->direction = DIR_RIGHT;
+    tq_pushback(snake, t);
+}
+
+void grow_snake(TileArena *mem, TileQueue *snake)
+{
+    Tile *t = ta_next(mem);
+    const Tile *tail = tq_peekback(snake);
+    if (tail->direction == DIR_UP) {
+        t->x = tail->x;
+        t->y = tail->y + 1;
+    } else if (tail->direction == DIR_DOWN) {
+        t->x = tail->x;
+        t->y = tail->y - 1;
+    } else if (tail->direction == DIR_LEFT) {
+        t->x = tail->x + 1;
+        t->y = tail->y;
+    } else if (tail->direction == DIR_RIGHT) {
+        t->x = tail->x - 1;
+        t->y = tail->y;
+    }
+    t->direction = tail->direction;
+    tq_pushback(snake, t);
 }
 
 bool move_snake(TileQueue *snake, TileQueue *movepoints)
@@ -411,12 +486,8 @@ bool move_snake(TileQueue *snake, TileQueue *movepoints)
             assert(false && "Unreachable!");
         }
 
-        // TODO
-        if (!check_collisions(&it)) {
-            ncurses_deinit();
-            printf("COLLISION!\n");
-            exit(1);
-        }
+        if (!check_collisions(&it))
+            return false;
     }
 
     return true;
@@ -430,4 +501,21 @@ void add_movepoint(TileArena *mem, TileQueue *snake,
     memcpy(mp, t, sizeof(*t));
     mp->direction = direction;
     tq_pushback(movepoints, mp);
+}
+
+void new_apple()
+{
+    // 1 to SCR_WIDTH - 1
+    size_t x = (rand() % (SCR_WIDTH - 2)) + 1;
+
+    // 2 to SCR_HEIGHT - 1
+    size_t y = (rand() % (SCR_HEIGHT - 3)) + 2;
+
+    APPLE.x = x;
+    APPLE.y = y;
+}
+
+bool check_eat_apple(const Tile *tile)
+{
+    return tile->x == APPLE.x && tile->y == APPLE.y;
 }
