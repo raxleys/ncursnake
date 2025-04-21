@@ -50,7 +50,21 @@ typedef struct {
 
 bool ta_init(TileArena *ta)
 {
-    size_t mem = SCR_HEIGHT * SCR_WIDTH * 2;
+    // The main thing eating memory is the "movepoint queue". For
+    // simplicity, the only allocations are in the queue's dynamic
+    // array of pointers, and this arena, which is used to generate
+    // Tile structs. A player could opt to just ignore eating apples
+    // and just move around the snake. This would result in a
+    // theoretically infinite number of Tile allocations from our
+    // arena, and since we cannot free individual allocations,
+    // eventually we'll run out of space.
+    // It would be more robust to find a way to reuse memory for the
+    // movepoint queue, but I don't care enough to bother, and prefer
+    // to keep the implementation simple. So, we'll just use an
+    // arbitrary multiple of the size of the board, and hopefully the
+    // player wins/loses before we run out of memory, otherwise, we'll
+    // just crash the program.
+    size_t mem = SCR_HEIGHT * SCR_WIDTH * 1000;
     Tile *tiles = calloc(mem, sizeof(*tiles));
     if (!tiles)
         return false;
@@ -72,7 +86,9 @@ void ta_deinit(TileArena *ta)
 Tile *ta_next(TileArena *ta)
 {
     if (ta->size + 1 > ta->capacity) {
-        perror("OOM!");
+        ncurses_deinit();
+        fprintf(stderr, "ERROR: Tile arena is out of memory!");
+        ta_deinit(ta);
         exit(1);
     }
 
@@ -80,26 +96,26 @@ Tile *ta_next(TileArena *ta)
 }
 
 // DEBUG
-void tq_printarr(TileQueue *queue)
+void tq_printarr(FILE *file, TileQueue *queue)
 {
-    printf("[");
+    fprintf(file, "[");
     for (size_t i = 0; i < queue->capacity; i++) {
         if (i == queue->head && i == queue->tail)
-            printf("F");
+            fprintf(file, "F");
         else if (i == queue->head)
-            printf("H");
+            fprintf(file, "H");
         else if (i == queue->tail)
-            printf("T");
+            fprintf(file, "T");
         else if (queue->tiles[i] != NULL)
-            printf("X");
+            fprintf(file, "X");
         else
-            printf("_");
+            fprintf(file, "_");
 
         if (i != queue->capacity - 1)
-            printf("|");
+            fprintf(file, "|");
     }
 
-    printf("]\n");
+    fprintf(file, "]\n");
 }
 
 TileQueueIter tq_iter(TileQueue *tq)
@@ -123,7 +139,7 @@ TileQueueIter tq_iter_clone(const TileQueueIter *it)
 bool tq_next(TileQueueIter *it)
 {
     TileQueue *tq = it->tq;
-    if (tq->head + it->i >= tq->size)
+    if (it->i >= tq->size)
         return false;
 
     int i = (tq->head + it->i) % tq->capacity;
@@ -172,7 +188,7 @@ Tile *tq_popfront(TileQueue *queue)
         return NULL;
 
     Tile *ret = queue->tiles[queue->head];
-    memset(queue->tiles + queue->head, 0, sizeof(*ret));
+    queue->tiles[queue->head] = NULL;
     queue->head = (queue->head + 1) % queue->capacity;
     queue->size--;
     return ret;
@@ -237,6 +253,7 @@ bool move_snake(TileQueue *snake, TileQueue *movepoints)
                     // is passing through a movepoint, it HAS to be
                     // the oldest one.
                     tq_popfront(movepoints);
+                    break;
                 }
             }
         }
@@ -260,8 +277,8 @@ bool move_snake(TileQueue *snake, TileQueue *movepoints)
 
         // TODO
         if (!check_collisions(&it)) {
-            printf("COLLISION!\n");
             ncurses_deinit();
+            printf("COLLISION!\n");
             exit(1);
         }
     }
@@ -289,12 +306,9 @@ int main()
 
     // Create snake
     TileQueue snake = {0};
-#define SNAKE_INIT_SIZE 9
+#define SNAKE_INIT_SIZE 4
     for (int i = 0; i < SNAKE_INIT_SIZE; i++) {
         Tile *t = ta_next(&tilemem);
-        if (!t) {
-            // TODO: goto?
-        }
 
         t->x = (SCR_WIDTH / 2) - i;
         t->y = (SCR_HEIGHT / 2);
@@ -314,25 +328,26 @@ int main()
     do {
         clock_gettime(CLOCK_MONOTONIC, &tlast);
 
-        // TODO: Need to ignore reverse head direction & multiple
-        // move points in the direction the head is already heading
         // Input
         ch = getch();
-        switch (ch) {
-        case 'q':
+        if (ch == 'q') {
             break;
-        case KEY_UP:
-            add_movepoint(&tilemem, &snake, &movepoints, DIR_UP);
-            break;
-        case KEY_DOWN:
-            add_movepoint(&tilemem, &snake, &movepoints, DIR_DOWN);
-            break;
-        case KEY_LEFT:
-            add_movepoint(&tilemem, &snake, &movepoints, DIR_LEFT);
-            break;
-        case KEY_RIGHT:
-            add_movepoint(&tilemem, &snake, &movepoints, DIR_RIGHT);
-            break;
+        } else if (ch == KEY_UP) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_UP && head->direction != DIR_DOWN)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_UP);
+        } else if (ch == KEY_DOWN) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_UP && head->direction != DIR_DOWN)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_DOWN);
+        } else if (ch == KEY_RIGHT) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_LEFT && head->direction != DIR_RIGHT)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_RIGHT);
+        } else if (ch == KEY_LEFT) {
+            const Tile *head = tq_peekfront(&snake);
+            if (head->direction != DIR_LEFT && head->direction != DIR_RIGHT)
+                add_movepoint(&tilemem, &snake, &movepoints, DIR_LEFT);
         }
 
         // Update
@@ -347,6 +362,16 @@ int main()
         while (tq_next(&it)) {
             mvaddch(it.val->y, it.val->x, '#');
         }
+
+        // TODO: DEBUG
+        it = tq_iter(&movepoints);
+        while (tq_next(&it)) {
+            mvaddch(it.val->y, it.val->x, 'X');
+        }
+
+        // Print score
+        size_t score = 0; // TODO: move
+        mvprintw(0, 0, "Score: %zu", score);
 
         refresh();
 
@@ -380,14 +405,14 @@ void ncurses_deinit()
 void draw_border()
 {
     // Corners
-    mvaddch(0, 0, '+');
-    mvaddch(0, SCR_WIDTH - 1, '+');
+    mvaddch(1, 0, '+');
+    mvaddch(1, SCR_WIDTH - 1, '+');
     mvaddch(SCR_HEIGHT - 1, 0, '+');
     mvaddch(SCR_HEIGHT - 1, SCR_WIDTH - 1, '+');
 
     // Edges
-    mvhline(0, 1, '-', SCR_WIDTH - 2);
+    mvhline(1, 1, '-', SCR_WIDTH - 2);
     mvhline(SCR_HEIGHT - 1, 1, '-', SCR_WIDTH - 2);
-    mvvline(1, 0, '|', SCR_HEIGHT - 2);
-    mvvline(1, SCR_WIDTH - 1, '|', SCR_HEIGHT - 2);
+    mvvline(2, 0, '|', SCR_HEIGHT - 3);
+    mvvline(2, SCR_WIDTH - 1, '|', SCR_HEIGHT - 3);
 }
