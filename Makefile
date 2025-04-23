@@ -11,6 +11,9 @@ build:
 	mkdir -p build
 	$(CC) -o $(EXEC) src/ncursnake.c -Iinc $(LIBS) $(CFLAGS)
 
+debug:
+	mkdir -p build
+	$(CC) -o $(EXEC) src/ncursnake.c -Iinc $(LIBS) $(CFLAGS) -DDEBUG
+
 clean:
 	rm -rf build
-

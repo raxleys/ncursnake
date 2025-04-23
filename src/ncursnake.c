@@ -53,6 +53,7 @@ Tile APPLE = {0};
 void ncurses_init();
 void ncurses_deinit();
 void draw_border();
+void draw_debug(TileArena *tilemem, TileQueue *movepoints);
 bool ta_init(TileArena *ta);
 void ta_deinit(TileArena *ta);
 Tile *ta_next(TileArena *ta);
@@ -81,8 +82,6 @@ int main()
 
     ncurses_init();
     getmaxyx(stdscr, SCR_HEIGHT, SCR_WIDTH);
-    ncurses_deinit();
-    return 1;
 
     TileArena tilemem = {0};
     ta_init(&tilemem);
@@ -153,23 +152,12 @@ int main()
         // Draw apple
         mvaddch(APPLE.y, APPLE.x, 'a');
 
-        // TODO: DEBUG
-#ifndef DEBUG
-#define DEBUG
-#endif
-
-#ifdef DEBUG
-        it = tq_iter(&movepoints);
-        while (tq_next(&it)) {
-            mvaddch(it.val->y, it.val->x, 'X');
-        }
-
-        // Print arena allocation info
-        mvprintw(0, 25, "Tile mem: %zu/%zu (%.2f%%)", tilemem.size, tilemem.capacity, ((double)tilemem.size)/((double)tilemem.capacity));
-#endif
-
         // Print score
         mvprintw(0, 0, "Score: %zu", score);
+
+#ifdef DEBUG
+        draw_debug(&tilemem, &movepoints);
+#endif
 
         refresh();
 
@@ -189,6 +177,7 @@ int main()
     tq_deinit(&movepoints);
     ta_deinit(&tilemem);
     ncurses_deinit();
+    printf("????\n");
     return 0;
 }
 
@@ -220,6 +209,18 @@ void draw_border()
     mvhline(SCR_HEIGHT - 1, 1, '#', SCR_WIDTH - 2);
     mvvline(2, 0, '#', SCR_HEIGHT - 3);
     mvvline(2, SCR_WIDTH - 1, '#', SCR_HEIGHT - 3);
+}
+
+void draw_debug(TileArena *tilemem, TileQueue *movepoints)
+{
+    // Display movepoints
+    TileQueueIter it = tq_iter(movepoints);
+    while (tq_next(&it)) {
+        mvaddch(it.val->y, it.val->x, 'X');
+    }
+
+    // Print arena allocation info
+    mvprintw(0, 25, "Tile mem: %zu/%zu (%.2f%%)", tilemem->size, tilemem->capacity, ((double)tilemem->size)/((double)tilemem->capacity));
 }
 
 bool ta_init(TileArena *ta)
