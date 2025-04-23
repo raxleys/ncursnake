@@ -22,19 +22,22 @@ int main()
     ncurses_init();
     getmaxyx(stdscr, SCR_HEIGHT, SCR_WIDTH);
 
+    // Initialize data structures
     TileArena tilemem = {0};
     ta_init(&tilemem);
 
-    // Create snake
     TileQueue snake = {0};
-    snake_init(&tilemem, &snake);
-    while (snake.size < SNAKE_INIT_SIZE)
-        grow_snake(&tilemem, &snake);
 
     // A "move point" is a tile on the board at which a snake tile has
     // to change directions. It is the tile at which the head was
     // located at a time when the player changed directions
     TileQueue movepoints = {0};
+
+game_setup:
+    // Create snake
+    snake_init(&tilemem, &snake);
+    while (snake.size < SNAKE_INIT_SIZE)
+        grow_snake(&tilemem, &snake);
 
     int ch;
     struct timespec tlast, tcur;
@@ -46,7 +49,7 @@ int main()
         // Input
         ch = getch();
         if (ch == 'q') {
-            break;
+            goto quit;
         } else if (ch == KEY_UP) {
             const Tile *head = tq_peekfront(&snake);
             if (head->direction != DIR_UP && head->direction != DIR_DOWN)
@@ -66,11 +69,9 @@ int main()
         }
 
         // Update
-        if (!move_snake(&snake, &movepoints)) {
-            // Collision
-            // TODO
+        // Returns false on collision
+        if (!move_snake(&snake, &movepoints))
             break;
-        }
 
         if (check_eat_apple(tq_peekfront(&snake))) {
             score += 10;
@@ -107,16 +108,19 @@ int main()
             usleep(FRAME_TIME - elapsedus);
     } while (true);
 
-    // TODO
-    // Make getch blocking again.
-    nodelay(stdscr, false);
-    getch();
+    if (prompt_play_again()) {
+        // Reset
+        ta_clear(&tilemem);
+        tq_clear(&snake);
+        tq_clear(&movepoints);
+        goto game_setup;
+    }
 
+quit:
     tq_deinit(&snake);
     tq_deinit(&movepoints);
     ta_deinit(&tilemem);
     ncurses_deinit();
-    printf("????\n");
     return 0;
 }
 
@@ -195,6 +199,11 @@ void ta_deinit(TileArena *ta)
     ta->tiles = NULL;
     ta->size = 0;
     ta->capacity = 0;
+}
+
+void ta_clear(TileArena *ta)
+{
+    ta->size = 0;
 }
 
 Tile *ta_next(TileArena *ta)
@@ -331,6 +340,13 @@ void tq_deinit(TileQueue *queue)
     memset(queue, 0, sizeof(*queue));
 }
 
+void tq_clear(TileQueue *queue)
+{
+    queue->head = 0;
+    queue->tail = 0;
+    queue->size = 0;
+}
+
 bool tile_eq(const Tile *t1, const Tile *t2)
 {
     return t1->x == t2->x && t1->y == t2->y;
@@ -458,4 +474,71 @@ void new_apple()
 bool check_eat_apple(const Tile *tile)
 {
     return tile->x == APPLE.x && tile->y == APPLE.y;
+}
+
+bool prompt_play_again()
+{
+    nodelay(stdscr, false);
+
+    // Dialog window dimensions
+    const char *message = "Play again?";
+    const int height = 5;
+    const int width = strlen(message) + 4;
+    int start_y = (LINES - height) / 2;
+    int start_x = (COLS - width) / 2;
+
+    WINDOW *dialog = newwin(height, width, start_y, start_x);
+
+    // Border
+    box(dialog, 0, 0);
+
+    const char *options[] = { "Yes", "No" };
+    mvwprintw(dialog, 1, 2, "%s", message);
+    int selected = 0;
+
+    int xoffset = ((width - strlen(options[0]) - strlen(options[1])) / 2) - 1;
+    for (int i = 0; i < 2; i++) {
+        if (i == selected)
+            wattron(dialog, A_REVERSE);
+
+        mvwprintw(dialog, 3, xoffset, "%s", options[i]);
+        wattroff(dialog, A_REVERSE);
+        xoffset += strlen(options[i]) + 1;
+    }
+
+    wrefresh(dialog);
+
+    int ch = 0;
+    while (true) {
+        ch = getch();
+        switch (ch) {
+        case KEY_LEFT:
+        case KEY_RIGHT:
+            selected = (selected + 1) % 2;
+            break;
+        case '\n':
+            goto done;
+        case 'q':
+            selected = 1;
+            goto done;
+        }
+
+        int xoffset = ((width - strlen(options[0]) - strlen(options[1])) / 2) - 1;
+        for (int i = 0; i < 2; i++) {
+            if (i == selected)
+                wattron(dialog, A_REVERSE);
+
+            mvwprintw(dialog, 3, xoffset, "%s", options[i]);
+            wattroff(dialog, A_REVERSE);
+            xoffset += strlen(options[i]) + 1;
+        }
+
+        wrefresh(dialog);
+    }
+
+done:
+    delwin(dialog);
+    refresh();
+    nodelay(stdscr, true);
+    return strcmp(options[selected], "Yes") == 0;
 }

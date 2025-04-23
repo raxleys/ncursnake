@@ -44,6 +44,7 @@ void draw_border();
 void draw_debug(TileArena *tilemem, TileQueue *movepoints);
 bool ta_init(TileArena *ta);
 void ta_deinit(TileArena *ta);
+void ta_clear(TileArena *ta);
 Tile *ta_next(TileArena *ta);
 void tq_printarr(FILE *file, TileQueue *queue);
 TileQueueIter tq_iter(TileQueue *tq);
@@ -55,6 +56,7 @@ Tile *tq_popfront(TileQueue *queue);
 Tile *tq_peekfront(TileQueue *queue);
 Tile *tq_peekback(TileQueue *queue);
 void tq_deinit(TileQueue *queue);
+void tq_clear(TileQueue *queue);
 bool tile_eq(const Tile *t1, const Tile *t2);
 bool check_collisions(TileQueueIter *it);
 void snake_init(TileArena *mem, TileQueue *snake);
@@ -63,5 +65,6 @@ bool move_snake(TileQueue *snake, TileQueue *movepoints);
 void add_movepoint(TileArena *mem, TileQueue *snake, TileQueue *movepoints, enum Dir direction);
 void new_apple();
 bool check_eat_apple(const Tile *tile);
+bool prompt_play_again();
 
 #endif // NCURSNAKE_H
